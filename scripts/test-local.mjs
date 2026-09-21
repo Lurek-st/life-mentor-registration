@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync, createWriteStream } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { readFile, copyFile } from "node:fs/promises";
+import ts from "typescript";
 const id = randomUUID(),
   space = "test-" + id;
 const formal = process.argv.includes("--formal");
@@ -33,7 +34,14 @@ const run = (script, args = []) =>
 await run("scripts/setup.mjs");
 mkdirSync("work", { recursive: true });
 // Absolute paths and secrets stay in ignored work/. Each run gets a separate database.
-const local = JSON.parse(await readFile("wrangler.local.jsonc", "utf8"));
+// Wrangler accepts comments and trailing commas, so strict JSON.parse is unsuitable.
+const parsed = ts.parseConfigFileTextToJson(
+  "wrangler.local.jsonc",
+  await readFile("wrangler.local.jsonc", "utf8"),
+);
+if (parsed.error)
+  throw Error(ts.flattenDiagnosticMessageText(parsed.error.messageText, "\n"));
+const local = parsed.config;
 writeFileSync(
   config,
   JSON.stringify(
