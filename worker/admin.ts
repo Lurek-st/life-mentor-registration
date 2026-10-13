@@ -23,6 +23,7 @@ import {
   profile,
   hmac,
   passwordMatches,
+  passwordText,
   setCookie,
   emailAddress,
   enforceFormalInputs,
@@ -250,7 +251,7 @@ export async function admin(r: Request, e: Env, url: URL): Promise<Response> {
         "WEAK_PASSWORD",
         "新口令至少16个字符，可使用一句容易记住的话。",
       );
-    const currentPassword = str(b.currentPassword, 300);
+    const currentPassword = passwordText(b.currentPassword);
     // Share the quota with backup reauthentication so switching endpoints
     // does not provide an unbounded way to guess the same staff password.
     await throttle(
@@ -375,7 +376,7 @@ export async function admin(r: Request, e: Env, url: URL): Promise<Response> {
   if (p === "/api/admin/backup" && ["GET", "POST"].includes(m)) {
     const supplied =
       m === "POST"
-        ? str((await body(r)).password, 300)
+        ? passwordText((await body(r)).password)
         : r.headers.get("X-Staff-Password");
     if (!supplied)
       fail(401, "REAUTH_REQUIRED", "下载完整备份前，请再次填写工作人员口令。");

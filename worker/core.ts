@@ -103,7 +103,7 @@ function equal(a: string, b: string) {
   for (let i = 0; i < a.length; i++) n |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return n === 0;
 }
-export function str(value: unknown, max = 200, optional = false) {
+function checkedText(value: unknown, max: number, optional: boolean) {
   if (
     typeof value !== "string" ||
     (!optional && !value.trim()) ||
@@ -111,6 +111,19 @@ export function str(value: unknown, max = 200, optional = false) {
   )
     fail(400, "INVALID_FIELD", "请检查必填内容和文字长度。");
   return value.trim();
+}
+// Existing credentials keep their original parsing semantics. A historical
+// password must remain usable for login, backup reauthentication and rotation.
+export const passwordText = (value: unknown) => checkedText(value, 300, false);
+export function str(value: unknown, max = 200, optional = false) {
+  const text = checkedText(value, max, optional);
+  if (
+    /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/.test(
+      value as string,
+    )
+  )
+    fail(400, "INVALID_FIELD", "内容包含无法使用的控制字符，请重新输入。");
+  return text;
 }
 export function integer(value: unknown, min = 0, max = 100000) {
   if (
