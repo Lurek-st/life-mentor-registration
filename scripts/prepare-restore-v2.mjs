@@ -36,3 +36,6 @@ writeFileSync(output, sql, { encoding: "utf8", flag: "wx", mode: 0o600 });
 console.log(
   "Validated restore SQL for an empty database; output contains personal data. No cloud data changed.",
 );
+console.log(
+  "Before exposing the restored service: keep the original APP_SECRET, configure a NEW unique ADMIN_PASSWORD, and verify the previous initial/shared passwords cannot log in. Backups intentionally omit the staff password digest; reusing the old environment password would reactivate it. See docs/UPGRADE-v3.md.",
+);

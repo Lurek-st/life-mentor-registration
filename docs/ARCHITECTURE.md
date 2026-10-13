@@ -9,7 +9,7 @@ flowchart LR
   Pages --> Staff
 ```
 
-React + TypeScript 负责页面，Vite 构建客户端；esbuild 把 `worker/index.ts` 编译成 Pages Advanced Mode 的 `_worker.js`。本机使用 Wrangler 的 Workers 运行时和本地 D1，不依赖远程数据库。完整结构文件仍名为 `schema/v2.sql`，备份基础格式 `schemaVersion=2` 保持兼容；新增独立参会与核对部分分别标记版本 1。软件公开版本为 3.0.0，不能把备份格式号当成软件版本。
+React + TypeScript 负责页面，Vite 构建客户端；esbuild 把 `worker/index.ts` 编译成 Pages Advanced Mode 的 `_worker.js`。本机使用 Wrangler 的 Workers 运行时和本地 D1，不依赖远程数据库。完整结构文件仍名为 `schema/v2.sql`，备份基础格式 `schemaVersion=2` 保持兼容；新增独立参会与核对部分分别标记版本 1。软件公开版本为 3.0.1，不能把备份格式号当成软件版本。
 
 ## 代码位置
 

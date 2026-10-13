@@ -16,9 +16,12 @@ export async function bundle(path) {
   );
 }
 export const worker = (await bundle("worker/index.ts")).default;
-export function fixture(mode = "formal") {
+export function fixture(
+  mode = "formal",
+  schema = readFileSync("schema/v2.sql", "utf8"),
+) {
   const db = new DatabaseSync(":memory:");
-  db.exec(readFileSync("schema/v2.sql", "utf8"));
+  db.exec(schema);
   let calls = 0;
   function stmt(sql, args = []) {
     return {

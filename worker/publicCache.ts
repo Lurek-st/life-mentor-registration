@@ -1,5 +1,6 @@
 import type { Env, Row } from "./core";
 import { settings } from "./core";
+import { requireCurrentSchema } from "./schemaHealth";
 
 // Only public source rows are cached. Status/deadline and server time are rebuilt
 // on every response. Binding identity isolates production, preview and tests.
@@ -37,6 +38,7 @@ export const publicSessions = (e: Env) =>
   });
 export const publicHealth = (e: Env) =>
   cached(health, e, async () => {
+    await requireCurrentSchema(e);
     const [v, config] = await Promise.all([
       e.DB.prepare("SELECT version FROM schema_meta").first(),
       settings(e),

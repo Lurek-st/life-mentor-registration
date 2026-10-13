@@ -9,6 +9,7 @@ import {
   json,
   body,
   str,
+  passwordText,
   integer,
   digest,
   hmac,
@@ -51,7 +52,7 @@ export default {
               code: "CANONICAL_ONLY",
               error: "请使用正式报名网址。",
               url: canonical + "/",
-              release: "3.0.0",
+              release: "3.0.1",
               mode: "formal",
               active: false,
             },
@@ -82,10 +83,17 @@ export default {
         fail(429, "RATE_LIMIT", "操作较频繁，请稍等一分钟后再试。");
       if (p === "/api/health" && m === "GET") {
         const { version, config: c } = await publicHealth(e);
+        if (version !== 2)
+          fail(
+            503,
+            "DB_UPGRADE_REQUIRED",
+            "数据库需要完成升级，请联系维护人员。",
+            { ok: false },
+          );
         return json({
           ok: version === 2,
           version: 2,
-          release: "3.0.0",
+          release: "3.0.1",
           mode: e.APP_MODE,
           registrationOpen:
             e.APP_MODE === "formal" && c.registration_open === "true",
@@ -313,7 +321,7 @@ export default {
       }
       if (p === "/api/admin/login" && m === "POST") {
         const b = await body(r),
-          password = str(b.password, 300);
+          password = passwordText(b.password);
         await throttle(
           e,
           "login:" + (r.headers.get("CF-Connecting-IP") || "local"),

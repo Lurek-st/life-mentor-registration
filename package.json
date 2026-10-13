@@ -1,6 +1,6 @@
 {
   "name": "life-mentor-registration",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,12 +11,14 @@
     "check": "tsc --noEmit",
     "build": "tsc --noEmit && vite build && node scripts/build-worker.mjs",
     "preview": "wrangler dev --config wrangler.local.jsonc --ip 127.0.0.1 --port 8787",
-    "test": "npm run test:security && npm run test:upgrade && npm run test:attendance && node scripts/test-local.mjs && node scripts/test-local.mjs --formal",
+    "test": "npm run test:security && npm run test:recovery && npm run test:public && npm run test:upgrade && npm run test:attendance && node scripts/test-local.mjs && node scripts/test-local.mjs --formal",
     "test:api": "node scripts/test-api-v2.mjs && node scripts/test-edge-v2.mjs",
     "test:ui": "node scripts/test-ui-v2.mjs",
     "check:public": "node scripts/check-public.mjs",
     "test:attendance": "node scripts/test-attendance-review.mjs",
     "test:upgrade": "node scripts/test-upgrade.mjs",
+    "test:recovery": "node tests/recovery.mjs",
+    "test:public": "node tests/public-release.mjs",
     "test:security": "node tests/security.mjs && node tests/hardening.mjs && node tests/security-review.mjs && node tests/network.mjs && node tests/identity.mjs"
   },
   "dependencies": {
