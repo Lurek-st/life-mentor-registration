@@ -1,4 +1,7 @@
+import { canonicalOrigin } from "./canonical";
 import { admin } from "./admin";
+import { burstAllowed } from "./burst";
+import { publicSessions, publicHealth, invalidatePublic } from "./publicCache";
 import {
   type Env,
   HttpError,
@@ -11,7 +14,7 @@ import {
   hmac,
   randomToken,
   settings,
-  allSessions,
+  session,
   getSession,
   snapshot,
   sqlError,
@@ -24,6 +27,9 @@ import {
   receipts,
   owned,
   registrationView,
+  emailAddress,
+  enforceFormalInputs,
+  update,
 } from "./core";
 export default {
   async fetch(r: Request, e: Env): Promise<Response> {
@@ -32,6 +38,26 @@ export default {
       m = r.method;
     if (!p.startsWith("/api/")) return e.ASSETS.fetch(r);
     try {
+      if (e.APP_MODE === "formal") {
+        let canonical: string;
+        try {
+          canonical = canonicalOrigin(url, e.CANONICAL_ORIGIN);
+        } catch {
+          fail(503, "SETUP_REQUIRED", "报名系统暂未完成配置。");
+        }
+        if (url.origin !== canonical)
+          return json(
+            {
+              code: "CANONICAL_ONLY",
+              error: "请使用正式报名网址。",
+              url: canonical + "/",
+              release: "3.0.0",
+              mode: "formal",
+              active: false,
+            },
+            410,
+          );
+      }
       if (!e.APP_SECRET || !e.ADMIN_PASSWORD)
         fail(503, "SETUP_REQUIRED", "报名系统暂未完成配置。");
       if (
@@ -40,26 +66,36 @@ export default {
         r.headers.get("origin") !== url.origin
       )
         fail(403, "ORIGIN", "请从本站页面提交。");
+      const lane =
+        p === "/api/admin/login"
+          ? "login"
+          : ["GET", "HEAD"].includes(m)
+            ? "read"
+            : "write";
+      const limit = lane === "login" ? 30 : 2000;
+      if (
+        !burstAllowed(
+          lane + ":" + (r.headers.get("CF-Connecting-IP") || "local"),
+          limit,
+        )
+      )
+        fail(429, "RATE_LIMIT", "操作较频繁，请稍等一分钟后再试。");
       if (p === "/api/health" && m === "GET") {
-        const v = await e.DB.prepare("SELECT version FROM schema_meta").first();
-        const c = await settings(e);
+        const { version, config: c } = await publicHealth(e);
         return json({
-          ok: v?.version === 2,
+          ok: version === 2,
           version: 2,
+          release: "3.0.0",
           mode: e.APP_MODE,
           registrationOpen:
             e.APP_MODE === "formal" && c.registration_open === "true",
         });
       }
       if (p === "/api/sessions" && m === "GET") {
-        const [sessions, rounds, config] = await Promise.all([
-          allSessions(e),
-          e.DB.prepare("SELECT * FROM rounds ORDER BY sort_order,id").all(),
-          settings(e),
-        ]);
+        const { rows, rounds, config } = await publicSessions(e);
         return json({
-          sessions,
-          rounds: rounds.results,
+          sessions: rows.map(session),
+          rounds,
           settings: config,
           serverNow: Math.floor(Date.now() / 1000),
           mode: e.APP_MODE,
@@ -67,11 +103,6 @@ export default {
         });
       }
       if (p === "/api/register" && m === "POST") {
-        await throttle(
-          e,
-          "submit-ip:" + (r.headers.get("CF-Connecting-IP") || "local"),
-          2000,
-        );
         const b = await body(r),
           v = profile(b);
         if (e.APP_MODE !== "formal" && !v.employeeId.startsWith("TEST-"))
@@ -80,7 +111,6 @@ export default {
           "employee:" + v.employeeId,
           e.APP_SECRET,
         );
-        await throttle(e, "employee:" + employeeHash, 20);
         const sessionId = str(b.sessionId, 80),
           requestId = str(b.requestId, 40),
           receipt = str(b.receipt, 100),
@@ -92,6 +122,7 @@ export default {
         )
           fail(400, "INVALID_REQUEST", "请核对报名信息并勾选确认。");
         const receiptHash = await digest(receipt),
+          email = b.email === undefined ? "" : emailAddress(b.email, true),
           fingerprint = await hmac(
             JSON.stringify([
               sessionId,
@@ -99,6 +130,7 @@ export default {
               v.department,
               v.employeeId,
               revision,
+              ...(b.email === undefined ? [] : [email]),
             ]),
             e.APP_SECRET,
           );
@@ -126,11 +158,40 @@ export default {
         }
         const prior = await replay();
         if (prior) return prior;
-        const s = await getSession(e, sessionId),
-          id = crypto.randomUUID();
+        // Preserve recovery of pre-upgrade submissions before enforcing the new field.
+        emailAddress(email);
+        enforceFormalInputs(e, v.employeeId, email);
+        const id = crypto.randomUUID();
         try {
+          // Reject an already unavailable session before writing any quota counters.
+          // The INSERT triggers remain authoritative if capacity/deadline/state changes
+          // after this read. Successful retries above still recover their original result.
+          const s = await getSession(e, sessionId);
+          if (s.state !== "published")
+            fail(409, "SESSION_UNAVAILABLE", "这场活动当前不能报名。");
+          if (s.deadline_at <= Math.floor(Date.now() / 1000))
+            fail(409, "DEADLINE_PASSED", "本场已截止报名。");
+          if (s.content_version !== revision)
+            fail(
+              409,
+              "SESSION_CHANGED",
+              "场次安排已更新，请核对最新日期、时间和内容后再提交。",
+            );
+          if (s.booked_count >= s.capacity)
+            fail(409, "SESSION_FULL", "本场已报满，请选择其他场次。");
+          await throttle(
+            e,
+            "submit-ip:" + (r.headers.get("CF-Connecting-IP") || "local"),
+            2000,
+          );
+          await throttle(e, "employee:" + employeeHash, 20);
+          await throttle(
+            e,
+            "email:" + (await hmac(email.toLowerCase(), e.APP_SECRET)),
+            20,
+          );
           await e.DB.prepare(
-            "INSERT INTO registrations(id,session_id,name,department,employee_id,employee_hash,receipt_hash,request_id,request_fingerprint,confirmed_revision,snapshot) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO registrations(id,session_id,name,department,employee_id,employee_hash,receipt_hash,request_id,request_fingerprint,confirmed_revision,snapshot,email) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
           )
             .bind(
               id,
@@ -144,6 +205,7 @@ export default {
               fingerprint,
               revision,
               snapshot(s),
+              email,
             )
             .run();
         } catch (error) {
@@ -151,21 +213,29 @@ export default {
           if (retry) return retry;
           sqlError(error);
         }
+        invalidatePublic(e);
         return json({ id, replayed: false, cancelled: false }, 201);
       }
       if (p === "/api/mine" && m === "POST") {
         const tokens = receipts(await body(r));
         if (!tokens.length) return json({ registrations: [] });
         const hashes = await Promise.all(tokens.map(digest));
-        const [rows, sessions, c] = await Promise.all([
+        const rows = await e.DB.prepare(
+          `SELECT * FROM registrations WHERE receipt_hash IN (${hashes.map(() => "?").join(",")})`,
+        )
+          .bind(...hashes)
+          .all();
+        if (!rows.results.length) return json({ registrations: [] });
+        const ids = [...new Set(rows.results.map((x) => x.session_id))];
+        const [raw, c] = await Promise.all([
           e.DB.prepare(
-            `SELECT * FROM registrations WHERE receipt_hash IN (${hashes.map(() => "?").join(",")})`,
+            `SELECT * FROM sessions WHERE id IN (${ids.map(() => "?").join(",")})`,
           )
-            .bind(...hashes)
+            .bind(...ids)
             .all(),
-          allSessions(e, true),
           settings(e),
         ]);
+        const sessions = raw.results.map(session);
         return json({
           registrations: rows.results.map((x) =>
             registrationView(
@@ -176,6 +246,24 @@ export default {
             ),
           ),
         });
+      }
+      if (p === "/api/registration-email" && m === "PATCH") {
+        const b = await body(r),
+          row = await owned(e, b),
+          email = emailAddress(b.email);
+        enforceFormalInputs(e, undefined, email);
+        await throttle(e, "email:" + row.receipt_hash, 20);
+        await update(
+          e,
+          e.DB.prepare(
+            "UPDATE registrations SET email=?,version=version+1 WHERE id=? AND version=?",
+          ).bind(email, row.id, integer(b.version, 1)),
+          "registration.email",
+          row.id,
+          { email: row.email || "" },
+          { email },
+        );
+        return json({ ok: true });
       }
       if (p === "/api/cancel" && m === "POST") {
         const b = await body(r),
@@ -189,6 +277,7 @@ export default {
           .run();
         if (!result.meta.changes)
           fail(409, "CANNOT_CANCEL", "目前不能自行取消，请联系工作人员。");
+        invalidatePublic(e);
         return json({ ok: true });
       }
       if (p === "/api/confirm-change" && m === "POST") {
@@ -198,23 +287,39 @@ export default {
           rev = integer(b.contentRevision, 1);
         if (s.content_version !== rev)
           fail(409, "SESSION_CHANGED", "活动又有更新，请刷新后再确认。");
+        if (row.cancelled_at || !["published", "paused"].includes(s.state))
+          fail(
+            409,
+            "SESSION_CHANGED",
+            "这条报名或活动已不可确认，请刷新后核对。",
+          );
+        if (row.confirmed_revision === rev) return json({ ok: true });
+        await throttle(e, "confirm:" + row.receipt_hash, 20);
         const result = await e.DB.prepare(
-          `UPDATE registrations SET confirmed_revision=?,snapshot=?,version=version+1 WHERE id=? AND cancelled_at IS NULL AND EXISTS(SELECT 1 FROM sessions WHERE id=registrations.session_id AND content_version=? AND state IN ('published','paused'))`,
+          `UPDATE registrations SET confirmed_revision=?,snapshot=?,version=version+1 WHERE id=? AND cancelled_at IS NULL AND confirmed_revision<>? AND EXISTS(SELECT 1 FROM sessions WHERE id=registrations.session_id AND content_version=? AND state IN ('published','paused'))`,
         )
-          .bind(rev, snapshot(s), row.id, rev)
+          .bind(rev, snapshot(s), row.id, rev, rev)
           .run();
-        if (!result.meta.changes)
-          fail(409, "SESSION_CHANGED", "活动又有更新，请刷新后再确认。");
+        if (!result.meta.changes) {
+          const confirmed = await e.DB.prepare(
+            "SELECT 1 AS ok FROM registrations r JOIN sessions s ON s.id=r.session_id WHERE r.id=? AND r.cancelled_at IS NULL AND r.confirmed_revision=? AND s.content_version=? AND s.state IN ('published','paused')",
+          )
+            .bind(row.id, rev, rev)
+            .first();
+          if (!confirmed)
+            fail(409, "SESSION_CHANGED", "活动又有更新，请刷新后再确认。");
+        }
         return json({ ok: true });
       }
       if (p === "/api/admin/login" && m === "POST") {
+        const b = await body(r),
+          password = str(b.password, 300);
         await throttle(
           e,
           "login:" + (r.headers.get("CF-Connecting-IP") || "local"),
           30,
         );
-        const b = await body(r);
-        if (!(await passwordMatches(e, str(b.password, 300))))
+        if (!(await passwordMatches(e, password)))
           fail(401, "BAD_PASSWORD", "工作人员口令不正确。");
         const token = randomToken();
         await e.DB.batch([
@@ -230,14 +335,17 @@ export default {
         });
       }
       if (p === "/api/admin/logout" && m === "POST") {
-        await e.DB.prepare("DELETE FROM admin_sessions WHERE token_hash=?")
-          .bind(await digest(cookie(r)))
-          .run();
+        if (/^[a-f0-9]{64}$/.test(cookie(r)))
+          await e.DB.prepare("DELETE FROM admin_sessions WHERE token_hash=?")
+            .bind(await digest(cookie(r)))
+            .run();
         return json({ ok: true }, 200, { "Set-Cookie": setCookie(r, "", 0) });
       }
       if (p.startsWith("/api/admin/")) {
         await requireAdmin(r, e);
-        return await admin(r, e, url);
+        const response = await admin(r, e, url);
+        if (!["GET", "HEAD"].includes(m) && response.ok) invalidatePublic(e);
+        return response;
       }
       fail(404, "NOT_FOUND", "没有找到这个操作。");
     } catch (error) {
@@ -245,6 +353,7 @@ export default {
         return json(
           { error: error.message, code: error.code, ...error.details },
           error.status,
+          error.status === 429 ? { "Retry-After": "60" } : {},
         );
       try {
         sqlError(error);

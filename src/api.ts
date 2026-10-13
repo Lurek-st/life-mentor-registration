@@ -14,46 +14,85 @@ export async function api<T>(
   data?: unknown,
   method?: string,
 ): Promise<T> {
-  let response: Response;
+  const verb = method || (data === undefined ? "GET" : "POST");
+  const readOnly = verb === "GET";
   const controller = new AbortController();
+  // One total time budget, including response-body download and a bounded read retry.
   const timeout = setTimeout(() => controller.abort(), 20000);
-  try {
-    response = await fetch("/api" + path, {
-      method: method || (data === undefined ? "GET" : "POST"),
-      headers: data === undefined ? {} : { "Content-Type": "application/json" },
-      body: data === undefined ? undefined : JSON.stringify(data),
-      signal: controller.signal,
-      cache: "no-store",
-    });
-  } catch {
-    clearTimeout(timeout);
-    throw new ApiError(
-      "连接中断或等待超时。请查看“我的报名”核对结果，再重试。",
+  const networkError = () =>
+    new ApiError(
+      readOnly || path === "/mine"
+        ? "连接中断或等待超时，请重新连接后再试。"
+        : path === "/register"
+          ? "连接中断或等待超时。请查看“我的报名”核对结果，再重试。"
+          : "连接中断或等待超时，操作结果尚未确认。请刷新核对后再操作。",
       "NETWORK",
     );
-  }
-  let value: any;
   try {
-    value = await response.json();
-  } catch {
-    throw new ApiError("服务暂时没有返回可识别的结果，请稍后重试。", "NETWORK");
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const response = await fetch("/api" + path, {
+          method: verb,
+          headers:
+            data === undefined ? {} : { "Content-Type": "application/json" },
+          body: data === undefined ? undefined : JSON.stringify(data),
+          signal: controller.signal,
+          cache: "no-store",
+        });
+        let value: any;
+        try {
+          value = await response.json();
+        } catch {
+          // HTML gateway errors must never be displayed as a successful API result.
+          if (response.status === 429)
+            throw new ApiError(
+              "操作较频繁，请稍等一分钟后再试。",
+              "RATE_LIMIT",
+              429,
+            );
+          if (response.status >= 400 && response.status < 500)
+            throw new ApiError("操作未完成。", "HTTP_ERROR", response.status);
+          throw networkError();
+        }
+        if (!response.ok) {
+          throw new ApiError(
+            typeof value?.error === "string" ? value.error : "操作未完成。",
+            typeof value?.code === "string" ? value.code : "",
+            response.status,
+            value && typeof value === "object" ? value : {},
+          );
+        }
+        if (!value || typeof value !== "object") throw networkError();
+        return value;
+      } catch (error) {
+        const e = error instanceof ApiError ? error : networkError();
+        // Never replay a write, a login, a permission denial, or a rate-limited call.
+        if (
+          readOnly &&
+          attempt === 0 &&
+          !controller.signal.aborted &&
+          (e.code === "NETWORK" || [502, 503, 504].includes(e.status))
+        ) {
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          if (!controller.signal.aborted) continue;
+        }
+        throw e;
+      }
+    }
   } finally {
     clearTimeout(timeout);
   }
-  if (!response.ok)
-    throw new ApiError(
-      value.error || "操作未完成。",
-      value.code,
-      response.status,
-      value,
-    );
-  return value;
 }
 export const randomHex = () =>
   Array.from(crypto.getRandomValues(new Uint8Array(32)), (x) =>
     x.toString(16).padStart(2, "0"),
   ).join("");
-export type Profile = { name: string; department: string; employeeId: string };
+export type Profile = {
+  name: string;
+  department: string;
+  employeeId: string;
+  email: string;
+};
 export type Attempt = {
   receipt: string;
   requestId: string;
@@ -66,14 +105,33 @@ export type Attempt = {
 const key = (space: string) => "mentor-v2:" + space + ":receipts";
 export function attempts(space: string): Attempt[] {
   try {
-    return JSON.parse(localStorage.getItem(key(space)) || "[]");
+    const list: Attempt[] = JSON.parse(
+      localStorage.getItem(key(space)) || "[]",
+    );
+    if (!Array.isArray(list)) return [];
+    const clean = list.map(minimalAttempt);
+    if (list.some((a) => a.payload && (a.id || a.failed))) {
+      try {
+        localStorage.setItem(key(space), JSON.stringify(clean));
+      } catch {
+        /* Read remains available. */
+      }
+    }
+    return clean;
   } catch {
     return [];
   }
 }
+function minimalAttempt(item: Attempt): Attempt {
+  if (item.id || item.failed) {
+    const { payload: _completedPayload, ...receipt } = item;
+    return receipt;
+  }
+  return item; // Pending data is needed to safely recover an interrupted submission.
+}
 export function saveAttempt(space: string, item: Attempt) {
   const list = attempts(space).filter((x) => x.receipt !== item.receipt);
-  list.push(item);
+  list.push(minimalAttempt(item));
   try {
     localStorage.setItem(key(space), JSON.stringify(list));
   } catch {
@@ -86,13 +144,17 @@ export function saveAttempt(space: string, item: Attempt) {
 }
 export function getProfile(space: string): Profile {
   try {
-    return (
-      JSON.parse(
+    return {
+      name: "",
+      department: "",
+      employeeId: "",
+      email: "",
+      ...JSON.parse(
         sessionStorage.getItem("mentor-profile:" + space) || "null",
-      ) || { name: "", department: "", employeeId: "" }
-    );
+      ),
+    };
   } catch {
-    return { name: "", department: "", employeeId: "" };
+    return { name: "", department: "", employeeId: "", email: "" };
   }
 }
 export function rememberProfile(space: string, p: Profile) {

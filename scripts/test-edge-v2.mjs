@@ -60,6 +60,7 @@ function payload(s, id) {
     sessionId: s.id,
     name: "边界验证虚构姓名",
     department: "测试部门",
+    email: "test-" + randomUUID() + "@example.invalid",
     employeeId: id || "TEST-" + randomUUID(),
     contentRevision: s.content_version,
     requestId: randomUUID(),

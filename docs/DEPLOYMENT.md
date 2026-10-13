@@ -2,6 +2,8 @@
 
 此项目的部署目标为 Cloudflare Pages（静态资源与 `_worker.js`）和 D1 数据库。以下指令只用于**你自己的新项目与数据库**。本仓库没有公共报名演示站，也不提供作者的生产资源。
 
+已有 v2 系统请先看 [升级指南](UPGRADE-v3.md)，以下初始化命令仅适用于新建空库。
+
 ## 1. 先本机验证
 
 完成 README 的快速开始与测试。使用自己的 Cloudflare 账户，在控制台确认当前计划、用量和费用；需要时由账户负责人处理账单。项目不要求购买自定义域名，Pages 可提供站点地址，但校园或单位网络是否能访问，需要在实际网络验证。
@@ -48,7 +50,7 @@ npx wrangler pages deploy dist --project-name YOUR_PROJECT --branch main
 npx wrangler d1 execute YOUR_FORMAL_DATABASE --config wrangler.jsonc --remote --file=schema/v2.sql
 ```
 
-将私有配置指向正式项目与正式库，设置 `APP_MODE=formal`、唯一的 `DATA_SPACE`（例如 `my-training-2026`），使用独立密钥并再次构建部署。空库没有轮次和场次，需在 `/#staff` 新建轮次、再创建真实活动。不要将演示库里的测试报名直接转为正式名单。
+将私有配置指向正式项目与正式库，设置 `APP_MODE=formal`、唯一的 `DATA_SPACE`（例如 `my-training-2026`）及 `CANONICAL_ORIGIN=https://YOUR_PROJECT.pages.dev`（准确的正式 HTTPS 域名，不带末尾斜线），使用独立密钥并再次构建部署。空库没有轮次和场次，需在 `/#staff` 新建轮次、再创建真实活动。不要将演示库里的测试报名直接转为正式名单。
 
 发布报名链接前：
 
@@ -57,6 +59,8 @@ npx wrangler d1 execute YOUR_FORMAL_DATABASE --config wrangler.jsonc --remote --
 3. 修改信息使用说明、组织方联系途径和保存期限，明确谁能看名单、怎样处理更正及删除。
 4. 在实际使用的微信和校园/单位网络验证打开、报名、查看、取消；测试资料由工作人员处理。
 5. 确定负责人员、备份存放位置与恢复演练。不要对正式站运行仓库的变更性测试。
+
+缺少正确的 `CANONICAL_ORIGIN` 时正式云 API 会返回配置未完成；部署别名上的正式 API 被拒绝。此前旧部署不会因此自动受到保护，仍需退役或设置访问策略。正式主网址应保持可供参加者访问。
 
 ## 维护提示
 

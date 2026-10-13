@@ -59,6 +59,7 @@ export type Booking = {
   name: string;
   department: string;
   employee_id: string;
+  email: string;
   created_at: number;
   cancelled_at: number | null;
   cancel_reason: string;

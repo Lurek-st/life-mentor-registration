@@ -1,4 +1,10 @@
 import { templates } from "../shared/model";
+import { localInput } from "../shared/programme";
+const noticeTime = (value: number) => localInput(value).replace("T", " ");
+import { validEmail } from "../shared/email";
+import { manual } from "./manual";
+import { combinedExport } from "./combinedExport";
+import { attendanceReview } from "./attendanceReview";
 import {
   type Env,
   type Row,
@@ -18,6 +24,9 @@ import {
   hmac,
   passwordMatches,
   setCookie,
+  emailAddress,
+  enforceFormalInputs,
+  throttle,
 } from "./core";
 const safeRecord = (x: Row) => ({
   id: x.id,
@@ -25,6 +34,7 @@ const safeRecord = (x: Row) => ({
   name: x.name,
   department: x.department,
   employee_id: x.employee_id,
+  email: x.email || "",
   version: x.version,
   cancelled_at: x.cancelled_at,
   cancel_reason: x.cancel_reason,
@@ -32,6 +42,49 @@ const safeRecord = (x: Row) => ({
 export async function admin(r: Request, e: Env, url: URL): Promise<Response> {
   const p = url.pathname,
     m = r.method;
+  const reviewResult = await attendanceReview(r, e, url);
+  if (reviewResult) return reviewResult;
+  if (p === "/api/admin/combined-export" && m === "GET")
+    return combinedExport(e, url);
+  const manualResult = await manual(r, e, url);
+  if (manualResult) return manualResult;
+  if (p === "/api/admin/recipients" && m === "GET") {
+    const sid = str(url.searchParams.get("session"), 80);
+    const s = await getSession(e, sid);
+    if (!["published", "paused", "cancelled"].includes(s.state))
+      fail(
+        400,
+        "NOTICE_UNAVAILABLE",
+        "草稿或归档活动请先核对活动状态，再准备通知。",
+      );
+    const q = url.searchParams.get("q")?.trim() || "";
+    if (q.length > 120) fail(400, "QUERY_TOO_LONG", "搜索文字过长。");
+    const term = "%" + q.replace(/[!%_]/g, "!$&") + "%";
+    const list = await e.DB.prepare(
+      `SELECT email FROM registrations WHERE session_id=? AND cancelled_at IS NULL ${q ? "AND (name LIKE ? ESCAPE '!' OR department LIKE ? ESCAPE '!' OR employee_id LIKE ? ESCAPE '!')" : ""} LIMIT 20001`,
+    )
+      .bind(sid, ...(q ? [term, term, term] : []))
+      .all();
+    if (list.results.length > 20000)
+      fail(400, "EXPORT_TOO_LARGE", "请缩小搜索范围后分批整理邮箱。");
+    const valid = list.results
+      .map((x) => String(x.email || ""))
+      .filter(validEmail);
+    const addresses = [...new Set(valid.map((x) => x.toLowerCase()))].sort();
+    const cancelled = s.state === "cancelled";
+    return json({
+      session: session(s),
+      total: list.results.length,
+      addresses,
+      missingEmail: list.results.length - valid.length,
+      duplicateEmails: valid.length - addresses.length,
+      generatedAt: Math.floor(Date.now() / 1000),
+      subject: `${cancelled ? "活动取消通知" : "培训安排提醒"}｜${s.title}`,
+      message: cancelled
+        ? `各位老师好：\n\n原定于 ${noticeTime(s.start_at)} 在 ${s.venue} 举行的“${s.title}”已取消，请勿按原安排前往。若已添加日历，请自行删除或调整该事项。\n${s.change_note || "后续安排请留意工作人员通知。"}\n\n感谢理解。`
+        : `各位老师好：\n\n您报名的培训安排如下，请核对并按时参加。\n主题：${s.title}\n时间：${noticeTime(s.start_at)}—${noticeTime(s.end_at)}（北京时间）\n地点：${s.venue}\n内容：${JSON.parse(s.subjects).join(" / ")}\n${s.change_note ? "安排说明：" + s.change_note + "\n" : ""}\n若时间有变，请以报名页面及最新通知为准。\n\n感谢参与。`,
+    });
+  }
   if (p === "/api/admin/state" && m === "GET") {
     const [sessions, rounds, config] = await Promise.all([
       allSessions(e, true),
@@ -197,7 +250,15 @@ export async function admin(r: Request, e: Env, url: URL): Promise<Response> {
         "WEAK_PASSWORD",
         "新口令至少16个字符，可使用一句容易记住的话。",
       );
-    if (!(await passwordMatches(e, str(b.currentPassword, 300))))
+    const currentPassword = str(b.currentPassword, 300);
+    // Share the quota with backup reauthentication so switching endpoints
+    // does not provide an unbounded way to guess the same staff password.
+    await throttle(
+      e,
+      "staff-reauth:" + (r.headers.get("CF-Connecting-IP") || "local"),
+      10,
+    );
+    if (!(await passwordMatches(e, currentPassword)))
       fail(401, "BAD_PASSWORD", "当前口令不正确。");
     await e.DB.batch([
       e.DB.prepare(
@@ -244,7 +305,7 @@ export async function admin(r: Request, e: Env, url: URL): Promise<Response> {
     if (exporting && count!.n > 20000)
       fail(400, "EXPORT_TOO_LARGE", "请按场次筛选后分批导出。");
     const { results } = await e.DB.prepare(
-      `SELECT r.id,r.session_id,r.name,r.department,r.employee_id,r.created_at,r.cancelled_at,r.cancel_reason,r.version,s.title AS session_title,s.start_at,s.end_at,s.venue,s.state AS event_state FROM registrations r JOIN sessions s ON s.id=r.session_id ${where} ORDER BY s.start_at,r.created_at,r.id LIMIT ? OFFSET ?`,
+      `SELECT r.id,r.session_id,r.name,r.department,r.employee_id,r.email,r.created_at,r.cancelled_at,r.cancel_reason,r.version,r.source,r.recorded_by,r.staff_note,s.title AS session_title,s.start_at,s.end_at,s.venue,s.state AS event_state FROM registrations r JOIN sessions s ON s.id=r.session_id ${where} ORDER BY s.start_at,r.created_at,r.id LIMIT ? OFFSET ?`,
     )
       .bind(...args, exporting ? 20000 : 50, exporting ? 0 : (page - 1) * 50)
       .all();
@@ -277,16 +338,19 @@ export async function admin(r: Request, e: Env, url: URL): Promise<Response> {
     }
     if (!recordMatch[2] && m === "PATCH") {
       const v = profile(b),
+        email =
+          b.email === undefined ? before.email : emailAddress(b.email, true),
         hash = await hmac("employee:" + v.employeeId, e.APP_SECRET);
+      enforceFormalInputs(e, v.employeeId, email);
       await update(
         e,
         e.DB.prepare(
-          "UPDATE registrations SET name=?,department=?,employee_id=?,employee_hash=?,version=version+1 WHERE id=? AND version=?",
-        ).bind(v.name, v.department, v.employeeId, hash, id, version),
+          "UPDATE registrations SET name=?,department=?,employee_id=?,employee_hash=?,email=?,version=version+1 WHERE id=? AND version=?",
+        ).bind(v.name, v.department, v.employeeId, hash, email, id, version),
         "registration.correct",
         id,
         safeRecord(before),
-        v,
+        { ...v, email },
       );
       return json({ ok: true });
     }
@@ -308,8 +372,30 @@ export async function admin(r: Request, e: Env, url: URL): Promise<Response> {
       })),
     });
   }
-  if (p === "/api/admin/backup" && m === "GET") {
-    const tables = ["rounds", "sessions", "registrations", "audit"];
+  if (p === "/api/admin/backup" && ["GET", "POST"].includes(m)) {
+    const supplied =
+      m === "POST"
+        ? str((await body(r)).password, 300)
+        : r.headers.get("X-Staff-Password");
+    if (!supplied)
+      fail(401, "REAUTH_REQUIRED", "下载完整备份前，请再次填写工作人员口令。");
+    await throttle(
+      e,
+      "staff-reauth:" + (r.headers.get("CF-Connecting-IP") || "local"),
+      10,
+    );
+    if (!(await passwordMatches(e, supplied)))
+      fail(401, "BAD_PASSWORD", "工作人员口令不正确。");
+    const tables = [
+      "rounds",
+      "sessions",
+      "registrations",
+      "audit",
+      "attendance_records",
+      "attendance_batches",
+      "attendance_checks",
+      "attendance_revisions",
+    ];
     const data = await e.DB.batch([
       ...tables.map((t) => e.DB.prepare(`SELECT * FROM ${t}`)),
       e.DB.prepare(
@@ -319,10 +405,12 @@ export async function admin(r: Request, e: Env, url: URL): Promise<Response> {
     return json(
       {
         schemaVersion: 2,
+        manualRecordsVersion: 1,
+        attendanceChecksVersion: 1,
         mode: e.APP_MODE,
         exportedAt: new Date().toISOString(),
         settings: Object.fromEntries(
-          data[4].results.map((x) => [x.key, x.value]),
+          data[tables.length].results.map((x) => [x.key, x.value]),
         ),
         ...Object.fromEntries(tables.map((t, i) => [t, data[i].results])),
       },

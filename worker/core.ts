@@ -1,4 +1,11 @@
+import {
+  EMPLOYEE_ERROR,
+  SCHOOL_EMAIL_ERROR,
+  validEmployeeNumber,
+  validSchoolEmail,
+} from "../shared/formInputs";
 import { normalizeEmployee } from "../shared/model";
+import { normaliseEmail, validEmail } from "../shared/email";
 import type { Session, EventState, AgendaItem } from "../shared/model";
 export type Row = Record<string, any>;
 export interface Result {
@@ -21,12 +28,15 @@ export interface Env {
   APP_SECRET: string;
   ADMIN_PASSWORD: string;
   DATA_SPACE?: string;
+  CANONICAL_ORIGIN?: string;
 }
 export const headers = {
   "Cache-Control": "no-store",
   "X-Content-Type-Options": "nosniff",
   "Referrer-Policy": "no-referrer",
   "X-Robots-Tag": "noindex, nofollow",
+  "X-Frame-Options": "DENY",
+  "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'",
 };
 const publicKeys = [
   "max_sessions",
@@ -60,7 +70,14 @@ export function json(
   status = 200,
   extra: Record<string, string> = {},
 ) {
-  return Response.json(value, { status, headers: { ...headers, ...extra } });
+  return Response.json(value, {
+    status,
+    headers: {
+      ...headers,
+      "Content-Type": "application/json; charset=utf-8",
+      ...extra,
+    },
+  });
 }
 const hex = (value: ArrayBuffer) =>
   Array.from(new Uint8Array(value), (x) =>
@@ -197,6 +214,12 @@ export function sqlError(error: unknown): never {
     SESSION_CHANGED: "场次安排已更新，请核对最新日期、时间和内容后再提交。",
     SESSION_FULL: "本场已报满，请选择其他场次。",
     PERSON_LIMIT: "已达到每人可报场数上限。",
+    STAFF_REGISTRATION_INVALID:
+      "活动已结束或补录说明不完整。已到场的老师请使用参会补记。",
+    ATTENDANCE_TOO_EARLY: "活动尚未开始，不能提前确认实际到场；请使用补报名。",
+    ATTENDANCE_CONFIRMATION_REQUIRED: "请填写确认人及到场确认依据。",
+    "attendance_records.session_id, attendance_records.employee_hash":
+      "该工号已有本场的有效参会补记，请先核对或更正原记录。",
     "registrations.session_id, registrations.employee_hash":
       "该工号已报名本场。请在“我的报名”查看，或联系工作人员协助核对。",
   };
@@ -204,7 +227,11 @@ export function sqlError(error: unknown): never {
     if (text.includes(code))
       fail(
         409,
-        code.includes("registrations.") ? "DUPLICATE_REGISTRATION" : code,
+        code.includes("registrations.")
+          ? "DUPLICATE_REGISTRATION"
+          : code.includes("attendance_records.")
+            ? "DUPLICATE_ATTENDANCE"
+            : code,
         message,
       );
   throw error;
@@ -213,14 +240,15 @@ export async function throttle(e: Env, key: string, limit: number) {
   const now = Math.floor(Date.now() / 1000);
   const k = await hmac(key + ":" + Math.floor(now / 60), e.APP_SECRET);
   const row = await e.DB.prepare(
-    "INSERT INTO rate_limits(key,count,expires_at) VALUES (?,1,?) ON CONFLICT(key) DO UPDATE SET count=count+1 RETURNING count",
+    "INSERT INTO rate_limits(key,count,expires_at) VALUES (?,1,?) ON CONFLICT(key) DO UPDATE SET count=count+1 WHERE count<? RETURNING count",
   )
-    .bind(k, now + 120)
+    .bind(k, now + 120, limit)
     .first();
-  if (row!.count > limit)
-    fail(429, "RATE_LIMIT", "操作较频繁，请稍等一分钟后再试。");
+  if (!row) fail(429, "RATE_LIMIT", "操作较频繁，请稍等一分钟后再试。");
   if (Math.random() < 0.02)
-    await e.DB.prepare("DELETE FROM rate_limits WHERE expires_at<?")
+    await e.DB.prepare(
+      "DELETE FROM rate_limits WHERE key IN (SELECT key FROM rate_limits WHERE expires_at<? LIMIT 100)",
+    )
       .bind(now)
       .run();
 }
@@ -304,6 +332,33 @@ export function profile(b: Row) {
     );
   return { name, department, employeeId };
 }
+export function emailAddress(value: unknown, optional = false) {
+  if (optional && (value === undefined || value === "")) return "";
+  if (typeof value !== "string" || /[\r\n]/.test(value))
+    fail(400, "INVALID_EMAIL", "请填写一个有效的联系邮箱。");
+  const email = normaliseEmail(value as string);
+  if (!email && !optional)
+    fail(
+      400,
+      "EMAIL_REQUIRED",
+      "报名需要联系邮箱。请刷新页面，补充邮箱后重新提交。",
+    );
+  if (optional && !email) return "";
+  if (!validEmail(email))
+    fail(400, "INVALID_EMAIL", "请填写一个有效的联系邮箱，不要填写多个地址。");
+  return email;
+}
+export function enforceFormalInputs(
+  e: Env,
+  employeeId: string | undefined,
+  email: string,
+) {
+  if (e.APP_MODE !== "formal") return;
+  if (employeeId !== undefined && !validEmployeeNumber(employeeId))
+    fail(400, "INVALID_EMPLOYEE", EMPLOYEE_ERROR);
+  if (email && !validSchoolEmail(email))
+    fail(400, "SCHOOL_EMAIL_REQUIRED", SCHOOL_EMAIL_ERROR);
+}
 export function receipts(b: Row) {
   if (
     !Array.isArray(b.receipts) ||
@@ -328,6 +383,7 @@ export function registrationView(
     name: row.name,
     department: row.department,
     employee_id: row.employee_id,
+    email: row.email || "",
     created_at: row.created_at,
     cancelled_at: row.cancelled_at,
     cancel_reason: row.cancel_reason,

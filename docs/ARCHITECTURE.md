@@ -9,7 +9,7 @@ flowchart LR
   Pages --> Staff
 ```
 
-React + TypeScript 负责页面，Vite 构建客户端；esbuild 把 `worker/index.ts` 编译成 Pages Advanced Mode 的 `_worker.js`。本机使用 Wrangler 的 Workers 运行时和本地 D1，不依赖远程数据库。数据库结构版本为 2。
+React + TypeScript 负责页面，Vite 构建客户端；esbuild 把 `worker/index.ts` 编译成 Pages Advanced Mode 的 `_worker.js`。本机使用 Wrangler 的 Workers 运行时和本地 D1，不依赖远程数据库。完整结构文件仍名为 `schema/v2.sql`，备份基础格式 `schemaVersion=2` 保持兼容；新增独立参会与核对部分分别标记版本 1。软件公开版本为 3.0.0，不能把备份格式号当成软件版本。
 
 ## 代码位置
 
@@ -26,7 +26,7 @@ React + TypeScript 负责页面，Vite 构建客户端；esbuild 把 `worker/ind
 
 ## 数据与一致性
 
-`rounds` 保存轮次，`sessions` 保存具体场次和容量，`registrations` 保存个人信息与取消状态，`settings` 保存规则。`audit` 记录修改；`admin_sessions` 保存已哈希的登录令牌；`rate_limits` 保存短期限制状态。
+`rounds` 保存轮次，`sessions` 保存具体场次和容量，`registrations` 保存个人信息与取消状态，`settings` 保存规则。`attendance_records` 保存独立到场证据；`attendance_checks`、`attendance_batches` 和 `attendance_revisions` 保存人工核对结果、批次及并发版本。`audit` 记录修改；`admin_sessions` 保存已哈希的登录令牌；`rate_limits` 保存短期限制状态。
 
 报名使用客户端生成的请求 ID 和私密凭证。请求发出前浏览器持久化恢复材料；响应丢失后仍能恢复同一笔报名。服务端核对请求指纹，相同请求幂等返回，修改请求内容不能复用原 ID。只有持有对应凭证才能查询、取消或确认变更。
 
@@ -42,6 +42,10 @@ React + TypeScript 负责页面，Vite 构建客户端；esbuild 把 `worker/ind
 - SQLite/D1 中业务个人资料并非应用层加密，数据库管理者可读。工号哈希用于查询/去重，不代表原工号匿名化。
 - 凭证在浏览器中是持有即授权的资料，跨设备需导入。公用设备应清除保存凭证。
 - 请求限流只用于基础保护，不是完善的防机器人或抗 DDoS 方案。没有 SSO、MFA、角色分工或逐人工作人员审计。
+
+参会核对按工号和场次关联证据，待核对不是缺席。一次批量核对原子保存，并检查预览版本和请求指纹；改期或证据更正会使相关结论提示重审。
+
+公开读取有短时缓存，报名和截止的最终判断仍由服务端及数据库执行。部分限流在单个运行实例生效，持续攻击仍可能消耗平台额度。正式云 API 受可配置的 canonical origin 限制。
 
 ## 时间与规模
 
