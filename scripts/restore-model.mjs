@@ -50,7 +50,7 @@ export function restoreSql(source) {
         : "'" + String(v).replaceAll("'", "''") + "'";
   let sql =
     schema +
-    "\nINSERT INTO edit_guards(scope,expected,actual) SELECT 'restore_empty','0',CAST((SELECT count(*) FROM sessions)+(SELECT count(*) FROM registrations)+(SELECT count(*) FROM rounds)+(SELECT count(*) FROM attendance_records)+(SELECT count(*) FROM attendance_checks)+(SELECT count(*) FROM attendance_batches)+(SELECT count(*) FROM attendance_revisions) AS TEXT);\nDELETE FROM edit_guards WHERE scope='restore_empty';\nDROP TRIGGER registration_gate_v2;\nDROP TRIGGER attendance_gate;\n";
+    "\nINSERT INTO edit_guards(scope,expected,actual) SELECT 'restore_empty','0',CAST((SELECT count(*) FROM audit)+(SELECT count(*) FROM admin_sessions)+(SELECT count(*) FROM sessions)+(SELECT count(*) FROM registrations)+(SELECT count(*) FROM rounds)+(SELECT count(*) FROM attendance_records)+(SELECT count(*) FROM attendance_checks)+(SELECT count(*) FROM attendance_batches)+(SELECT count(*) FROM attendance_revisions) AS TEXT);\nDELETE FROM edit_guards WHERE scope='restore_empty';\nDROP TRIGGER registration_gate_v2;\nDROP TRIGGER attendance_gate;\n";
   for (const { name } of db
     .prepare(
       "SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'review_%'",

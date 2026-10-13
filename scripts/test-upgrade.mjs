@@ -67,6 +67,22 @@ assert.throws(
   () => restored.exec(readFileSync(sqlFile, "utf8")),
   /EDIT_CONFLICT/,
 );
+for (const existing of [
+  "INSERT INTO audit(id,action,target) VALUES(999,'fixture','old audit')",
+  "INSERT INTO admin_sessions(token_hash,expires_at) VALUES('synthetic-old-session',9999999999)",
+]) {
+  const occupied = new DatabaseSync(":memory:");
+  occupied.exec(readFileSync("schema/v2.sql", "utf8") + existing);
+  assert.throws(
+    () => occupied.exec(readFileSync(sqlFile, "utf8")),
+    /EDIT_CONFLICT/,
+  );
+  assert.equal(
+    occupied.prepare("SELECT count(*) n FROM registrations").get().n,
+    0,
+  );
+  occupied.close();
+}
 console.log(
   "PASS shipped CLI restores v2 without losing Chinese, leading zeros, receipts, counts or settings; refuses occupied target",
 );
