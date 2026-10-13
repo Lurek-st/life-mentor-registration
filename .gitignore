@@ -19,3 +19,9 @@ wrangler.*.private.jsonc
 !schema/*.sql
 .DS_Store
 Thumbs.db
+
+!migrations/*.sql
+!tests/fixtures/**/*.sql
+.memory/
+private*/
+*.mentor-backup

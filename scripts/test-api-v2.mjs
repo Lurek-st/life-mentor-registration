@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { randomUUID, randomBytes } from "node:crypto";
-import { DatabaseSync } from "node:sqlite";
+import { restoreSql } from "./restore-model.mjs";
 import { Agent, setGlobalDispatcher } from "undici";
 setGlobalDispatcher(new Agent({ connections: 16, pipelining: 1 }));
 import { localTestURL } from "./test-safety.mjs";
@@ -101,6 +101,7 @@ function person(s, employeeId = "TEST-" + randomBytes(10).toString("hex")) {
     sessionId: s.id,
     name: "虚构测试导师",
     department: "虚构测试部门",
+    email: "test-" + randomUUID() + "@example.invalid",
     employeeId,
     contentRevision: s.content_version,
     requestId: randomUUID(),
@@ -405,47 +406,13 @@ try {
     "Settings update is transactional, rejects stale edits, global closure enforced",
   );
   const backup = status(
-    await req("/admin/backup", undefined, "GET", true),
+    await req("/admin/backup", { password }, "POST", true),
     200,
   );
   assert.equal(backup.schemaVersion, 2);
   assert.ok(!JSON.stringify(backup).includes(password));
   assert.ok(!backup.settings.admin_password_digest);
-  const db = new DatabaseSync(":memory:");
-  db.exec(readFileSync("schema/v2.sql", "utf8"));
-  db.exec("DROP TRIGGER registration_gate_v2");
-  db.exec("BEGIN");
-  for (const table of ["rounds", "sessions", "registrations", "audit"])
-    for (const row of backup[table]) {
-      const v = {
-        ...row,
-        ...(table === "sessions" ? { booked_count: 0 } : {}),
-      };
-      const keys = Object.keys(v);
-      db.prepare(
-        "INSERT INTO " +
-          table +
-          " (" +
-          keys.join(",") +
-          ") VALUES (" +
-          keys.map(() => "?").join(",") +
-          ")",
-      ).run(...Object.values(v));
-    }
-  for (const [key, value] of Object.entries(backup.settings))
-    db.prepare("UPDATE settings SET value=? WHERE key=?").run(value, key);
-  db.exec("COMMIT");
-  db.exec(readFileSync("schema/v2.sql", "utf8"));
-  for (const s of backup.sessions)
-    assert.equal(
-      db.prepare("SELECT booked_count FROM sessions WHERE id=?").get(s.id)
-        .booked_count,
-      s.booked_count,
-    );
-  assert.equal(
-    db.prepare("SELECT count(*) n FROM registrations").get().n,
-    backup.registrations.length,
-  );
+  const { db } = restoreSql(backup);
   assert.equal(
     db.prepare("PRAGMA integrity_check").get().integrity_check,
     "ok",
@@ -453,7 +420,7 @@ try {
   assert.equal(db.prepare("PRAGMA foreign_key_check").all().length, 0);
   db.close();
   mark(
-    "Backup transaction exports consistent snapshot; full restore rehearsal counts/integrity/foreign keys pass",
+    "Application backup restores all supported tables through the shipped restore implementation",
   );
   const oldCookie = cookie,
     newPassword = "TestOnly-" + randomBytes(20).toString("hex");

@@ -11,9 +11,12 @@ import {
 import { stamp } from "../shared/programme";
 import { api, download } from "./api";
 import { Modal, Message } from "./components";
+import { BusyButton } from "./motion";
 import SessionEditor, { type EditSession } from "./SessionEditor";
 import AdminRecords from "./AdminRecords";
+import AdminReview from "./AdminReview";
 import HistoryDiff from "./HistoryDiff";
+import BackupDialog from "./BackupDialog";
 type State = {
   sessions: Session[];
   rounds: Round[];
@@ -46,6 +49,7 @@ export default function Admin({ onChanged }: { onChanged: () => void }) {
     [rules, setRules] = useState<Settings | null>(null),
     [roundEdit, setRoundEdit] = useState<Partial<Round> | null>(null),
     [passwordOpen, setPasswordOpen] = useState(false),
+    [backupOpen, setBackupOpen] = useState(false),
     [oldPass, setOldPass] = useState(""),
     [newPass, setNewPass] = useState(""),
     [repeatPass, setRepeatPass] = useState("");
@@ -65,6 +69,7 @@ export default function Admin({ onChanged }: { onChanged: () => void }) {
   }, []);
   async function login(e: React.FormEvent) {
     e.preventDefault();
+    if (busy) return;
     setBusy(true);
     setError("");
     try {
@@ -78,6 +83,7 @@ export default function Admin({ onChanged }: { onChanged: () => void }) {
     }
   }
   async function run(fn: () => Promise<void>) {
+    if (busy) return;
     setBusy(true);
     setError("");
     try {
@@ -200,14 +206,19 @@ export default function Admin({ onChanged }: { onChanged: () => void }) {
               type="password"
               required
               autoComplete="current-password"
+              disabled={busy}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
           </label>
-          {error && <Message>{error}</Message>}
-          <button className="button primary full" disabled={busy}>
-            {busy ? "正在登录…" : "登录后台"}
-          </button>
+          {error && <Message focusOnMount>{error}</Message>}
+          <BusyButton
+            className="button primary full"
+            busy={busy}
+            pendingLabel="正在登录…"
+          >
+            登录后台
+          </BusyButton>
         </form>
       </section>
     );
@@ -263,6 +274,7 @@ export default function Admin({ onChanged }: { onChanged: () => void }) {
         {[
           ["sessions", "场次与轮次"],
           ["records", "报名名单"],
+          ["attendance", "参会核对"],
           ["settings", "规则与备份"],
         ].map(([v, label]) => (
           <button
@@ -276,7 +288,7 @@ export default function Admin({ onChanged }: { onChanged: () => void }) {
       </div>
       {tab === "sessions" ? (
         <>
-          <div className="records-toolbar">
+          <div className="records-toolbar session-toolbar">
             <label>
               轮次
               <select value={round} onChange={(e) => setRound(e.target.value)}>
@@ -304,26 +316,31 @@ export default function Admin({ onChanged }: { onChanged: () => void }) {
                 )}
               </select>
             </label>
-            <button className="button primary" onClick={() => setEdit(fresh())}>
-              新增场次
-            </button>
-            <button
-              className="button secondary"
-              onClick={() =>
-                setRoundEdit({
-                  title: "新轮次",
-                  sort_order: data.rounds.length + 1,
-                })
-              }
-            >
-              新增轮次
-            </button>
+            <div className="session-toolbar-actions">
+              <button
+                className="button primary"
+                onClick={() => setEdit(fresh())}
+              >
+                新增场次
+              </button>
+              <button
+                className="button secondary"
+                onClick={() =>
+                  setRoundEdit({
+                    title: "新轮次",
+                    sort_order: data.rounds.length + 1,
+                  })
+                }
+              >
+                新增轮次
+              </button>
+            </div>
           </div>
-          <div className="round-chips">
+          <div className="round-chips" role="group" aria-label="编辑轮次">
             {data.rounds.map((r) => (
               <button
                 key={r.id}
-                className="text-button"
+                className="round-edit-button"
                 onClick={() => {
                   setRoundEdit({ ...r });
                   setError("");
@@ -416,11 +433,18 @@ export default function Admin({ onChanged }: { onChanged: () => void }) {
         </>
       ) : tab === "records" ? (
         <AdminRecords
+          formal={data.mode === "formal"}
           sessions={data.sessions}
           onChanged={() => {
             void refresh();
             onChanged();
           }}
+        />
+      ) : tab === "attendance" ? (
+        <AdminReview
+          sessions={data.sessions}
+          rounds={data.rounds}
+          formal={data.mode === "formal"}
         />
       ) : (
         <div className="settings-panel">
@@ -451,21 +475,9 @@ export default function Admin({ onChanged }: { onChanged: () => void }) {
             <button
               className="button secondary"
               disabled={busy}
-              onClick={() =>
-                void run(async () => {
-                  const value = await api("/admin/backup");
-                  download(
-                    "生活导师备份-" +
-                      new Date().toISOString().replaceAll(":", "-") +
-                      ".json",
-                    JSON.stringify(value, null, 2),
-                    "application/json",
-                  );
-                  setMessage("备份已下载，请妥善保存。");
-                })
-              }
+              onClick={() => setBackupOpen(true)}
             >
-              下载完整备份
+              下载加密完整备份
             </button>
             <button
               className="button secondary"
@@ -479,6 +491,7 @@ export default function Admin({ onChanged }: { onChanged: () => void }) {
           </p>
         </div>
       )}
+      {backupOpen && <BackupDialog onClose={() => setBackupOpen(false)} />}
       {edit && (
         <SessionEditor
           key={edit.id + ":" + String(edit.isNew)}
@@ -492,6 +505,7 @@ export default function Admin({ onChanged }: { onChanged: () => void }) {
       {roundEdit && (
         <Modal
           title={roundEdit.id ? "编辑轮次" : "新增轮次"}
+          closeDisabled={busy}
           onClose={() => setRoundEdit(null)}
         >
           <form
@@ -515,6 +529,7 @@ export default function Admin({ onChanged }: { onChanged: () => void }) {
               <input
                 required
                 maxLength={120}
+                disabled={busy}
                 value={roundEdit.title}
                 onChange={(e) =>
                   setRoundEdit({ ...roundEdit, title: e.target.value })
@@ -527,6 +542,7 @@ export default function Admin({ onChanged }: { onChanged: () => void }) {
                 type="number"
                 min={0}
                 max={100000}
+                disabled={busy}
                 value={roundEdit.sort_order}
                 onChange={(e) =>
                   setRoundEdit({
@@ -536,15 +552,23 @@ export default function Admin({ onChanged }: { onChanged: () => void }) {
                 }
               />
             </label>
-            {error && <Message>{error}</Message>}
-            <button className="button primary" disabled={busy}>
+            {error && <Message focusOnMount>{error}</Message>}
+            <BusyButton
+              className="button primary"
+              busy={busy}
+              pendingLabel="正在保存…"
+            >
               保存轮次
-            </button>
+            </BusyButton>
           </form>
         </Modal>
       )}
       {rules && (
-        <Modal title="报名规则" onClose={() => setRules(null)}>
+        <Modal
+          title="报名规则"
+          closeDisabled={busy}
+          onClose={() => setRules(null)}
+        >
           <form
             className="editor-form"
             onSubmit={(e) => {
@@ -576,6 +600,7 @@ export default function Admin({ onChanged }: { onChanged: () => void }) {
                 type="number"
                 min={0}
                 max={100000}
+                disabled={busy}
                 value={rules.max_sessions}
                 onChange={(e) =>
                   setRules({ ...rules, max_sessions: e.target.value })
@@ -585,6 +610,7 @@ export default function Admin({ onChanged }: { onChanged: () => void }) {
             <label className="check-label">
               <input
                 type="checkbox"
+                disabled={busy}
                 checked={rules.registration_open === "true"}
                 onChange={(e) =>
                   setRules({
@@ -598,6 +624,7 @@ export default function Admin({ onChanged }: { onChanged: () => void }) {
             <label className="check-label">
               <input
                 type="checkbox"
+                disabled={busy}
                 checked={rules.self_cancel === "true"}
                 onChange={(e) =>
                   setRules({ ...rules, self_cancel: String(e.target.checked) })
@@ -612,6 +639,7 @@ export default function Admin({ onChanged }: { onChanged: () => void }) {
               <textarea
                 required
                 maxLength={1000}
+                disabled={busy}
                 value={rules.contact}
                 onChange={(e) =>
                   setRules({ ...rules, contact: e.target.value })
@@ -623,19 +651,24 @@ export default function Admin({ onChanged }: { onChanged: () => void }) {
               <textarea
                 required
                 maxLength={3000}
+                disabled={busy}
                 value={rules.retention}
                 onChange={(e) =>
                   setRules({ ...rules, retention: e.target.value })
                 }
               />
             </label>
-            {error && <Message>{error}</Message>}
+            {error && <Message focusOnMount>{error}</Message>}
             <p className="muted">
               减少每人场数不取消已有报名；已取消或归档的活动不占新报名的场数限制。
             </p>
-            <button className="button primary" disabled={busy}>
+            <BusyButton
+              className="button primary"
+              busy={busy}
+              pendingLabel="正在保存…"
+            >
               保存规则
-            </button>
+            </BusyButton>
           </form>
         </Modal>
       )}
@@ -651,6 +684,12 @@ export default function Admin({ onChanged }: { onChanged: () => void }) {
                     "session.update": "修改场次",
                     "session.create": "新增场次",
                     "registration.correct": "纠正报名信息",
+                    "registration.staff_create": "工作人员补报名",
+                    "attendance.create": "新增已确认参会补记",
+                    "attendance.correct": "更正参会补记",
+                    "attendance.cancel": "撤销参会补记",
+                    "attendance.review": "参会核对",
+                    "registration.email": "报名者更新联系邮箱",
                     "registration.cancel": "取消个人报名",
                     "round.create": "新增轮次",
                     "round.update": "修改轮次",
@@ -706,7 +745,11 @@ export default function Admin({ onChanged }: { onChanged: () => void }) {
         </Modal>
       )}
       {passwordOpen && (
-        <Modal title="修改工作人员口令" onClose={() => setPasswordOpen(false)}>
+        <Modal
+          title="修改工作人员口令"
+          closeDisabled={busy}
+          onClose={() => setPasswordOpen(false)}
+        >
           <form
             className="editor-form"
             onSubmit={(e) => {
@@ -735,6 +778,7 @@ export default function Admin({ onChanged }: { onChanged: () => void }) {
                 type="password"
                 required
                 autoComplete="current-password"
+                disabled={busy}
                 value={oldPass}
                 onChange={(e) => setOldPass(e.target.value)}
               />
@@ -746,6 +790,7 @@ export default function Admin({ onChanged }: { onChanged: () => void }) {
                 required
                 minLength={16}
                 autoComplete="new-password"
+                disabled={busy}
                 value={newPass}
                 onChange={(e) => setNewPass(e.target.value)}
               />
@@ -757,15 +802,16 @@ export default function Admin({ onChanged }: { onChanged: () => void }) {
                 required
                 minLength={16}
                 autoComplete="new-password"
+                disabled={busy}
                 value={repeatPass}
                 onChange={(e) => setRepeatPass(e.target.value)}
               />
             </label>
             <p>保存后，所有工作人员登录都会立即失效。</p>
-            {error && <Message>{error}</Message>}
-            <button className="button primary" disabled={busy}>
+            {error && <Message focusOnMount>{error}</Message>}
+            <BusyButton busy={busy} pendingLabel="正在保存…">
               保存并退出所有登录
-            </button>
+            </BusyButton>
           </form>
         </Modal>
       )}

@@ -3,22 +3,22 @@
 [![CI](https://github.com/Lurek-st/life-mentor-registration/actions/workflows/ci.yml/badge.svg)](https://github.com/Lurek-st/life-mentor-registration/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-面向小规模机构内部培训的报名系统：参加者填写**姓名、部门、工号**即可报名；工作人员管理每场的时间、名额、状态和名单。支持 Cloudflare Pages + D1，也可完全在本机体验。
+面向小规模机构内部培训的报名系统：参加者填写**姓名、部门、工号和联系邮箱**即可报名；工作人员管理每场的时间、名额、状态和名单。支持 Cloudflare Pages + D1，也可完全在本机体验。
 
-A self-hostable, Chinese-first training registration app with per-session capacity and deadlines, account-free participant registration, private booking receipts, and a staff console. Built with React, TypeScript, Cloudflare Workers and D1. The sample programme is fictional; no institutional endorsement is implied.
+A self-hostable, bilingual participant registration and Chinese staff administration app with per-session capacity and deadlines, account-free participant registration, private booking receipts, and a staff console. Built with React, TypeScript, Cloudflare Workers and D1. The sample programme is fictional; no institutional endorsement is implied.
 
 ![电脑端场次列表，全部为虚构示例](docs/images/desktop.png)
 
 ## 功能
 
-| 参加者                                 | 工作人员                           |
-| -------------------------------------- | ---------------------------------- |
-| 按轮次或月份查看主题、内容、时间、地点 | 新建、复制场次，调整轮次和排序     |
-| 查看已报名人数与剩余名额               | 修改容量，默认 36，可调大或调小    |
-| 每场独立截止，报满或截止后停止接收     | 改期、暂停、取消、归档与恢复       |
-| 三项信息报名，无需创建账号             | 姓名、部门、工号纠错和名单筛选     |
-| 私密凭证查看“我的报名”、自行取消       | XLSX 名单导出、JSON 备份和修改记录 |
-| 提交结果丢失后的恢复、重复提交保护     | 显示变更影响人数，检查并发修改冲突 |
+| 参加者                                 | 工作人员                                  |
+| -------------------------------------- | ----------------------------------------- |
+| 按轮次或月份查看主题、内容、时间、地点 | 新建、复制场次，调整轮次和排序            |
+| 查看已报名人数与剩余名额               | 修改容量，默认 36，可调大或调小           |
+| 每场独立截止，报满或截止后停止接收     | 改期、暂停、取消、归档与恢复              |
+| 四项信息报名，无需创建账号             | 补报名、补录未报名到场者、资料纠错        |
+| 私密凭证查看“我的报名”、自行取消       | 单场与学期 Excel 汇总、加密备份和修改记录 |
+| 提交结果丢失后的恢复、重复提交保护     | 显示变更影响人数，检查并发修改冲突        |
 
 名额和截止规则由后端及数据库执行。降低容量不会挤掉已有报名；改期不改变所属轮次；取消活动保留名单；恢复活动不会恢复个人已取消的报名。人数通过重新获取服务器数据更新，**不是 WebSocket 实时推送**，提交时以数据库为准。
 
@@ -30,6 +30,10 @@ A self-hostable, Chinese-first training registration app with per-session capaci
 ![工作人员后台，全部为虚构示例](docs/images/staff.png)
 
 </details>
+
+**v3.0.0：**新增参会核对与学期汇总、中英文界面、邮箱整理与日历下载、可配置身份格式，以及备份再认证与加密恢复。已有 v2 用户先看 [升级指南](docs/UPGRADE-v3.md)，不要重新初始化数据库。
+
+报名、工作人员补报名和确认到场分别记录。签到未确定时保持“待核对”，不会把未勾选人员自动记为缺席；批量核对有版本检查、修改依据和断网后的结果查询。
 
 ## 本机快速开始
 
@@ -59,7 +63,7 @@ npm run build
 npm test
 ```
 
-测试使用独立的本机数据库和随机数据空间，默认端口 `8788`；不会访问云端数据库。覆盖桌面与手机界面、断网恢复、最后一个名额的竞争、500 次集中提交、重复报名、旧页面、容量下调、改期、取消与恢复、后台会话、导出和备份恢复。500 次提交是本机正确性测试，**不是云端吞吐量或服务可用性保证**。
+测试使用独立的本机数据库和随机数据空间，默认端口 `8788`；不会访问云端数据库。覆盖桌面与手机界面、断网恢复、最后一个名额的竞争、500 次集中提交、重复报名、旧页面、容量下调、改期、取消与恢复、后台会话、到场核对、双语交互、导出、旧版迁移和加密备份恢复。500 次提交是本机正确性测试，**不是云端吞吐量或服务可用性保证**。
 
 Linux 如缺少浏览器依赖，使用 `npx playwright install --with-deps chromium`。已有 Chrome 的 Windows 开发者也可先设置环境变量 `PW_CHANNEL=chrome`。测试会生成私有工作文件到 `work/`，不要公开整个目录或测试数据库。
 
@@ -70,6 +74,7 @@ GitHub Actions 会执行类型检查、构建、内容检查和完整本机测�
 - [部署到自己的 Cloudflare 账户](docs/DEPLOYMENT.md)：演示与正式库分开、环境变量、HTTPS 和上线检查。
 - [使用与运维](docs/OPERATIONS.md)：工作人员入口、口令、名单、通知、备份和恢复。
 - [架构与规则](docs/ARCHITECTURE.md)：数据模型、并发、信任边界、扩展位置。
+- [通用配置](docs/CONFIGURATION.md) · [v2 升级与恢复](docs/UPGRADE-v3.md) · [维护与同步](docs/MAINTAINING.md)
 - [参与贡献](CONTRIBUTING.md) · [安全报告](SECURITY.md) · [更新记录](CHANGELOG.md)
 
 通用主题模板在 `shared/programme.ts`，议程模板在 `shared/model.ts`，名称和介绍展示在 `src/App.tsx` 与 `index.html`。示例排期由 `scripts/seed-demo.mjs` 生成；部署后通过后台维护实际场次。日期显示和“前一晚 22:00”采用北京时间 `Asia/Shanghai`。

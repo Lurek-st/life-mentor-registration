@@ -1,13 +1,12 @@
+import { EmployeeField, EmailField } from "./IdentityFields";
+import { useLanguage } from "./language";
 import { useState, useRef, useEffect } from "react";
 import { Copy, CheckCircle2, Download } from "lucide-react";
-import {
-  type Session,
-  type Snapshot,
-  shortDate,
-  weekday,
-} from "../shared/model";
-import { stamp, timeOnly } from "../shared/programme";
-import { Modal, Message, Occupancy } from "./components";
+import { type Session, type Snapshot } from "../shared/model";
+import { timeOnly } from "../shared/programme";
+import { Modal, ModalCloseButton, Message, Occupancy } from "./components";
+import CalendarAction from "./CalendarAction";
+import { BusyButton } from "./motion";
 import {
   api,
   ApiError,
@@ -32,6 +31,8 @@ export default function SessionDrawer({
   onChanged: () => void;
   onPrivacy: () => void;
 }) {
+  const { tr, english, content, sessionTitle, shortDate, weekday, stamp } =
+    useLanguage();
   const [profile, setProfile] = useState(() => getProfile(data.dataSpace)),
     [consent, setConsent] = useState(false),
     [busy, setBusy] = useState(false),
@@ -126,7 +127,10 @@ export default function SessionDrawer({
   }
   return (
     <Modal
-      title={success ? "报名已确认" : "培训场次详情"}
+      title={success ? tr("报名已确认") : tr("培训场次详情")}
+      dismissOnBackdrop
+      closeDisabled={busy}
+      focusKey={success}
       onClose={() => {
         if (!busy) onClose();
       }}
@@ -139,52 +143,61 @@ export default function SessionDrawer({
           </span>
         </div>
         <div>
-          <h2>{s.title}</h2>
-          <p>{s.subjects.join(" / ")}</p>
-          <p>{s.venue}</p>
+          <h2>{sessionTitle(s)}</h2>
+          <p>{s.subjects.map(content).join(" / ")}</p>
+          <p>{content(s.venue)}</p>
         </div>
       </div>
       {success ? (
         <section className="confirmation">
-          <CheckCircle2 size={42} />
-          <h2>{data.mode === "formal" ? "报名成功" : "测试报名成功"}</h2>
-          {error && <Message>{error}</Message>}
+          <span className="success-mark" aria-hidden="true">
+            <CheckCircle2 size={42} />
+          </span>
+          <h2>
+            {data.mode === "formal" ? tr("报名成功") : tr("测试报名成功")}
+          </h2>
+          {error && <Message>{tr(error)}</Message>}
           <p>
-            {profile.name}，已为你登记本场名额。
+            {profile.name}
+            {tr("，已为你登记本场名额。")}
             <br />
-            可在本浏览器的“我的报名”查看和取消。
+            {tr("可在本浏览器的“我的报名”查看和取消。")}
           </p>
+          <CalendarAction session={s} />
           <div className="receipt">
-            <label>私密报名凭证 · 换设备时使用</label>
+            <label>{tr("私密报名凭证 · 换设备时使用")}</label>
             <code>{pending.current?.receipt}</code>
             <div className="button-row">
               <button className="button secondary" onClick={copy}>
                 <Copy size={16} />
-                {copied ? "已复制" : "复制凭证"}
+                {copied ? tr("已复制") : tr("复制凭证")}
               </button>
               <button
                 className="button secondary"
                 onClick={() =>
-                  download("我的报名凭证.txt", pending.current!.receipt)
+                  download(tr("我的报名凭证.txt"), pending.current!.receipt)
                 }
               >
                 <Download size={16} />
-                保存凭证
+                {tr("保存凭证")}
               </button>
             </div>
           </div>
           <p className="muted">
-            本浏览器已保存凭证。请勿转发给他人；清理浏览器记录可能丢失凭证，可事先保存一份。
+            {tr(
+              "本浏览器已保存凭证。请勿转发给他人；清理浏览器记录可能丢失凭证，可事先保存一份。",
+            )}
           </p>
-          <button className="button primary full" onClick={onClose}>
-            返回场次列表
-          </button>
+          <ModalCloseButton className="button primary full">
+            {tr("返回场次列表")}
+          </ModalCloseButton>
         </section>
       ) : (
         <>
           <section className="agenda">
             <h3>
-              本场内容 <small>Session programme</small>
+              {tr("本场内容")}
+              {!english && <small lang="en">Session programme</small>}
             </h3>
             {s.agenda.map((a, i) => (
               <div className="agenda-item" key={i}>
@@ -193,41 +206,55 @@ export default function SessionDrawer({
                   {timeOnly(s.start_at + (a.offset + a.minutes) * 60)}
                 </time>
                 <div>
-                  <strong>{a.title}</strong>
-                  {a.description && <p>{a.description}</p>}
+                  <strong>{content(a.title)}</strong>
+                  {a.description && <p>{content(a.description)}</p>}
                 </div>
               </div>
             ))}
           </section>
-          {s.change_note && <Message>安排说明：{s.change_note}</Message>}
+          {s.change_note && (
+            <Message>
+              {tr("安排说明：")}
+              {content(s.change_note)}
+            </Message>
+          )}
           <div className="detail-status">
             <Occupancy session={s} />
             <p>
-              报名截止：{stamp(s.deadline_at)}
+              {tr("报名截止：")}
+              {stamp(s.deadline_at)}
               <br />
-              <small>全部时间为北京时间</small>
+              <small>{tr("全部时间为北京时间")}</small>
             </p>
           </div>
+          {error && (
+            <Message focusOnMount>
+              {tr(error)}
+              {pending.current && (
+                <p>
+                  <a href="#mine" onClick={onClose}>
+                    {tr("我的报名")}
+                  </a>
+                </p>
+              )}
+            </Message>
+          )}
           {s.status === "open" && data.settings.registration_open === "true" ? (
             <form className="registration-form" onSubmit={submit}>
               <h3>
-                {data.mode === "formal" ? "填写报名信息" : "填写测试信息"}
+                {data.mode === "formal"
+                  ? tr("填写报名信息")
+                  : tr("填写测试信息")}
               </h3>
               <p className="muted">
-                无需注册。请核对姓名、所属部门和工号。
+                {tr("无需注册。请核对姓名、所属部门、工号和联系邮箱。")}
                 {data.mode === "preview"
-                  ? "测试工号须以 TEST- 开头，请勿填写真实个人资料。"
+                  ? tr("测试工号须以 TEST- 开头，请勿填写真实个人资料。")
                   : ""}
               </p>
-              {(["name", "department", "employeeId"] as const).map((k, i) => (
+              {(["name", "department"] as const).map((k, i) => (
                 <label key={k}>
-                  {
-                    [
-                      "姓名 Name",
-                      "所属部门 Department / Unit",
-                      "工号 Employee number",
-                    ][i]
-                  }
+                  {[tr("姓名 Name"), tr("所属部门 Department / Unit")][i]}
                   <input
                     required
                     maxLength={k === "department" ? 120 : 80}
@@ -248,9 +275,32 @@ export default function SessionDrawer({
                   />
                 </label>
               ))}
+              <EmployeeField
+                formal={data.mode === "formal"}
+                value={profile.employeeId}
+                disabled={busy}
+                onChange={(employeeId) => {
+                  setProfile((p) => ({ ...p, employeeId }));
+                  setConsent(false);
+                }}
+              />
+              <EmailField
+                formal={data.mode === "formal"}
+                value={profile.email}
+                disabled={busy}
+                onChange={(email) => {
+                  setProfile((p) => ({ ...p, email }));
+                  setConsent(false);
+                }}
+              />
+              <p className="muted">
+                {tr(
+                  "邮箱供工作人员发送培训通知。网站不会自动发送确认邮件；报名结果以本页提示和“我的报名”为准。",
+                )}
+              </p>
               {changed && (
                 <Message>
-                  这场活动的安排有更新，请重新核对上方内容并确认。
+                  {tr("这场活动的安排有更新，请重新核对上方内容并确认。")}
                 </Message>
               )}
               <label className="check-label">
@@ -262,36 +312,42 @@ export default function SessionDrawer({
                   onChange={(e) => setConsent(e.target.checked)}
                 />
                 <span>
-                  我已核对信息与场次安排，确认可以参加，并知晓报名资料的使用说明。
+                  {tr(
+                    "我已核对信息与场次安排，确认可以参加，并知晓报名资料的使用说明。",
+                  )}
                 </span>
               </label>
-              <button type="button" className="text-button" onClick={onPrivacy}>
-                查看信息使用说明
-              </button>
-              {error && <Message>{error}</Message>}
               <button
+                type="button"
+                className="text-button"
+                disabled={busy}
+                onClick={onPrivacy}
+              >
+                {tr("查看信息使用说明")}
+              </button>
+              <BusyButton
                 className="button primary full"
+                busy={busy}
+                pendingLabel={tr("正在确认名额…")}
                 disabled={busy || !consent}
               >
-                {busy
-                  ? "正在确认名额…"
-                  : data.mode === "formal"
-                    ? "确认报名"
-                    : "确认测试报名"}
-              </button>
+                {data.mode === "formal" ? tr("确认报名") : tr("确认测试报名")}
+              </BusyButton>
               <p className="muted">
-                浏览不预留名额，以提交后的确认结果为准。连接中断后可在“我的报名”核对结果。
+                {tr(
+                  "浏览不预留名额，以提交后的确认结果为准。连接中断后可在“我的报名”核对结果。",
+                )}
               </p>
             </form>
           ) : (
             <Message>
               {s.status === "full"
-                ? "本场名额已满，请选择其他场次。"
+                ? tr("本场名额已满，请选择其他场次。")
                 : s.status === "closed"
-                  ? "本场已截止报名。"
+                  ? tr("本场已截止报名。")
                   : s.state === "cancelled"
-                    ? "本场活动已取消。"
-                    : "本场暂不接受报名。"}
+                    ? tr("本场活动已取消。")
+                    : tr("本场暂不接受报名。")}
             </Message>
           )}
         </>

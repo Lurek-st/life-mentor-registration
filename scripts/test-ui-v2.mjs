@@ -29,6 +29,9 @@ async function fill(name, id) {
     .getByLabel("所属部门 Department / Unit", { exact: true })
     .fill("虚构界面测试部门");
   await page.getByLabel("工号 Employee number", { exact: true }).fill(id);
+  await page
+    .getByLabel("联系邮箱 Email", { exact: true })
+    .fill("ui-" + Date.now() + "@example.invalid");
   await page.locator(".registration-form input[type=checkbox]").check();
 }
 try {
@@ -58,7 +61,11 @@ try {
   );
   await page
     .getByRole("button", {
-      name: Number(selectedMonth.slice(5)) + "月",
+      name: snapshot.sessions.every(
+        (s) => monthOf(s).slice(0, 4) === selectedMonth.slice(0, 4),
+      )
+        ? Number(selectedMonth.slice(5)) + "月"
+        : selectedMonth.replace("-", "年") + "月",
       exact: true,
     })
     .click();
@@ -86,7 +93,7 @@ try {
   await page.getByRole("button", { name: "确认取消报名", exact: true }).click();
   await assertText("本人报名已取消");
   checks.push(
-    "Editable three-field registration -> server confirmation -> My registrations -> cancel releases seat.",
+    "Editable four-field registration -> server confirmation -> My registrations -> cancel releases seat.",
   );
   await page.getByRole("button", { name: "培训场次", exact: true }).click();
   await page

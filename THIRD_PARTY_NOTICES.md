@@ -1,6 +1,6 @@
 # Third-party notices
 
-This project's original code is MIT licensed. Dependencies remain under their own licenses. Versions below correspond to the initial public release; the lockfile is the dependency version authority.
+This project's original code is MIT licensed. Dependencies remain under their own licenses. Versions below were checked for v3.0.0; the lockfile is the dependency version authority.
 
 ## Code included in browser bundles
 

@@ -21,12 +21,15 @@ try {
     .getByLabel("所属部门 Department / Unit", { exact: true })
     .fill("仅本机验证");
   await page.getByLabel("工号 Employee number", { exact: true }).fill(employee);
+  await page
+    .getByLabel("联系邮箱 Email", { exact: true })
+    .fill("formal-test@example.invalid");
   await page.locator(".registration-form input[type=checkbox]").check();
   await page.getByRole("button", { name: "确认报名", exact: true }).click();
   await page.getByRole("heading", { name: "报名成功", exact: true }).waitFor();
   await page.getByRole("button", { name: "返回场次列表", exact: true }).click();
   await page.getByRole("button", { name: "我的报名", exact: true }).click();
-  await page.getByText("工号 " + employee, { exact: false }).waitFor();
+  await page.getByText(employee, { exact: false }).waitFor();
   await page.getByRole("button", { name: "取消本场报名", exact: true }).click();
   await page.getByRole("button", { name: "确认取消报名", exact: true }).click();
   await page.getByText("本人报名已取消", { exact: true }).waitFor();

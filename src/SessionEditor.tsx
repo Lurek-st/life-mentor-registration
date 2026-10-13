@@ -9,7 +9,8 @@ import {
 } from "../shared/model";
 import { localInput, stamp } from "../shared/programme";
 import { api, ApiError } from "./api";
-import { Modal, Message } from "./components";
+import { Modal, ModalCloseButton, Message } from "./components";
+import { BusyButton } from "./motion";
 export type EditSession = Session & { isNew?: boolean };
 export default function SessionEditor({
   initial,
@@ -39,6 +40,7 @@ export default function SessionEditor({
     Math.floor(new Date(value + ":00+08:00").getTime() / 1000);
   async function save(e: React.FormEvent) {
     e.preventDefault();
+    if (busy) return;
     setBusy(true);
     setError("");
     try {
@@ -75,6 +77,7 @@ export default function SessionEditor({
   }
   return (
     <Modal
+      closeDisabled={busy}
       title={s.isNew ? "新增培训场次" : "编辑培训场次"}
       wide
       onClose={() => {
@@ -86,6 +89,7 @@ export default function SessionEditor({
           <label>
             所属轮次
             <select
+              disabled={busy}
               value={s.round_id}
               onChange={(e) => patch({ round_id: e.target.value })}
             >
@@ -99,6 +103,7 @@ export default function SessionEditor({
           <label>
             活动状态
             <select
+              disabled={busy}
               value={s.state}
               onChange={(e) => patch({ state: e.target.value as EventState })}
             >
@@ -115,6 +120,7 @@ export default function SessionEditor({
         <label>
           内容模板
           <select
+            disabled={busy}
             value={s.template_key}
             onChange={(e) => {
               const t = templates.find((t) => t.key === e.target.value);
@@ -144,6 +150,7 @@ export default function SessionEditor({
         <label>
           场次标题
           <input
+            disabled={busy}
             required
             maxLength={160}
             value={s.title}
@@ -153,6 +160,7 @@ export default function SessionEditor({
         <label>
           英文标题（可留空）
           <input
+            disabled={busy}
             maxLength={200}
             value={s.title_en}
             onChange={(e) => patch({ title_en: e.target.value })}
@@ -161,6 +169,7 @@ export default function SessionEditor({
         <label>
           主题摘要（每行一项）
           <textarea
+            disabled={busy}
             value={s.subjects.join("\n")}
             onChange={(e) => patch({ subjects: e.target.value.split("\n") })}
           />
@@ -169,6 +178,7 @@ export default function SessionEditor({
           <label>
             开始时间（北京时间）
             <input
+              disabled={busy}
               type="datetime-local"
               required
               value={localInput(s.start_at)}
@@ -181,6 +191,7 @@ export default function SessionEditor({
           <label>
             结束时间（北京时间）
             <input
+              disabled={busy}
               type="datetime-local"
               required
               value={localInput(s.end_at)}
@@ -192,6 +203,7 @@ export default function SessionEditor({
           <label>
             报名截止时间
             <input
+              disabled={busy}
               type="datetime-local"
               required
               value={localInput(s.deadline_at)}
@@ -205,6 +217,7 @@ export default function SessionEditor({
             <button
               type="button"
               className="button secondary"
+              disabled={busy}
               onClick={() =>
                 patch({ deadline_at: previousEvening(s.start_at) })
               }
@@ -215,6 +228,7 @@ export default function SessionEditor({
           <label>
             名额上限
             <input
+              disabled={busy}
               type="number"
               required
               min={1}
@@ -226,6 +240,7 @@ export default function SessionEditor({
           <label>
             同日排序
             <input
+              disabled={busy}
               type="number"
               min={0}
               max={100000}
@@ -237,6 +252,7 @@ export default function SessionEditor({
         <label>
           培训地点
           <input
+            disabled={busy}
             required
             maxLength={200}
             value={s.venue}
@@ -254,6 +270,7 @@ export default function SessionEditor({
                 <label>
                   开始偏移（分钟）
                   <input
+                    disabled={busy}
                     type="number"
                     min={0}
                     max={1440}
@@ -270,6 +287,7 @@ export default function SessionEditor({
                 <label>
                   时长（分钟）
                   <input
+                    disabled={busy}
                     type="number"
                     min={1}
                     max={1440}
@@ -287,6 +305,7 @@ export default function SessionEditor({
               <label>
                 议程标题
                 <input
+                  disabled={busy}
                   required
                   maxLength={160}
                   value={a.title}
@@ -302,6 +321,7 @@ export default function SessionEditor({
               <label>
                 内容说明
                 <textarea
+                  disabled={busy}
                   maxLength={3000}
                   value={a.description}
                   onChange={(e) =>
@@ -316,6 +336,7 @@ export default function SessionEditor({
               <button
                 type="button"
                 className="text-button danger"
+                disabled={busy}
                 onClick={() =>
                   patch({ agenda: s.agenda.filter((_, j) => j !== i) })
                 }
@@ -327,6 +348,7 @@ export default function SessionEditor({
           <button
             type="button"
             className="button secondary"
+            disabled={busy}
             onClick={() =>
               patch({
                 agenda: [
@@ -347,6 +369,7 @@ export default function SessionEditor({
         <label>
           公开安排说明（改期、取消原因等）
           <textarea
+            disabled={busy}
             maxLength={1000}
             value={s.change_note}
             onChange={(e) => patch({ change_note: e.target.value })}
@@ -376,6 +399,7 @@ export default function SessionEditor({
         {affected && (
           <label className="check-label">
             <input
+              disabled={busy}
               type="checkbox"
               checked={ack}
               onChange={(e) => setAck(e.target.checked)}
@@ -386,22 +410,19 @@ export default function SessionEditor({
             </span>
           </label>
         )}
-        {error && <Message>{error}</Message>}
+        {error && <Message focusOnMount>{error}</Message>}
         <div className="sticky-actions">
-          <button
+          <BusyButton
             className="button primary"
+            busy={busy}
+            pendingLabel="正在保存…"
             disabled={busy || (affected && !ack)}
           >
-            {busy ? "正在保存…" : "保存场次"}
-          </button>
-          <button
-            className="button secondary"
-            type="button"
-            onClick={onClose}
-            disabled={busy}
-          >
+            保存场次
+          </BusyButton>
+          <ModalCloseButton className="button secondary" disabled={busy}>
             返回
-          </button>
+          </ModalCloseButton>
         </div>
       </form>
     </Modal>

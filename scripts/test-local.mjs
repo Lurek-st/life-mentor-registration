@@ -118,9 +118,16 @@ try {
     throw Error(
       "Local test server did not become ready; see ignored work/test-server.log",
     );
-  for (const file of formal
-    ? ["test-formal-local.mjs"]
-    : ["test-ui-v2.mjs", "test-api-v2.mjs", "test-edge-v2.mjs"])
+  for (const file of process.argv.includes("--v3-only")
+    ? ["test-v3-ui.mjs"]
+    : formal
+      ? ["test-formal-local.mjs"]
+      : [
+          "test-ui-v2.mjs",
+          "test-api-v2.mjs",
+          "test-edge-v2.mjs",
+          "test-v3-ui.mjs",
+        ])
     await run("scripts/" + file);
   console.log(
     "PASS: " +

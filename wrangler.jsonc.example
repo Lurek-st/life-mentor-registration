@@ -4,7 +4,8 @@
   "compatibility_date": "2026-09-21",
   "vars": {
     "APP_MODE": "preview",
-    "DATA_SPACE": "your-demo-v1"
+    "DATA_SPACE": "your-demo-v1",
+    "CANONICAL_ORIGIN": "https://your-project.pages.dev"
   },
   "d1_databases": [
     {
